@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Upload, Catalog, Save MARC</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; padding: 20px; background: #f8f9fa; text-align: center; }
+    form, #dropZone, textarea, input[type="text"] { width: 90%; max-width: 700px; margin: auto; }
+    form { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    textarea, input[type="text"] { padding: 10px; margin-bottom: 10px; font-family: monospace; }
+    button { cursor: pointer; padding: 10px; width: 100%; background-color: #007bff; color: white; border: none; border-radius: 5px; margin-top: 10px; }
+    pre { text-align: left; background: #eee; padding: 10px; overflow: auto; max-height: 300px; white-space: pre-wrap; margin-top: 20px; }
+    #dropZone { border: 2px dashed #007bff; padding: 20px; border-radius: 8px; background-color: #e9f5ff; cursor: pointer; margin-top: 20px; }
+    #dropZone:hover { background-color: #d0ebff; }
+    #progressIndicator, #filePreview, #chatbox, #results { margin-top: 20px; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.12.313/pdf.min.js">
+    function copyAllExtractedText() {
+      const tempTextarea = document.createElement("textarea");
+      tempTextarea.value = allExtractedText;
+      document.body.appendChild(tempTextarea);
+      tempTextarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(tempTextarea);
+      alert("All extracted text copied!");
+    }
+
+</script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.12.313/pdf.worker.min.js';
+
+    let totalFiles = 0, processedFiles = 0, allExtractedText = "";
+
+    function save() {
+      const val = document.getElementById("text").value.trim();
+      if (!val) return alert("Nothing to save.");
+      const data = JSON.parse(localStorage.getItem("books") || "[]");
+      data.push({ marc: val });
+      localStorage.setItem("books", JSON.stringify(data));
+      alert("Saved!");
+    }
+
+    function download() {
+      const data = JSON.parse(localStorage.getItem("books") || "[]");
+      if (!data.length) return alert("No records to export.");
+      const content = data.map(x => x.marc).join("\n\n");
+      const blob = new Blob([content], { type: "text/plain" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "records.mrk";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    }
+
+    function previewFiles(event) { processFiles(event.target.files); }
+
+    function handleDrop(event) {
+      event.preventDefault(); event.stopPropagation();
+      processFiles(event.dataTransfer.files);
+    }
+
+    function processFiles(files) {
+      if (!files || files.length === 0) return;
+      totalFiles = files.length; processedFiles = 0; allExtractedText = "";
+      document.getElementById('filePreview').innerHTML = "";
+      document.getElementById('progressIndicator').innerText = "";
+      Array.from(files).forEach(file => {
+        if (file.type === "application/pdf") extractTextFromPDF(file);
+        else {
+          const reader = new FileReader();
+          reader.onload = e => { appendToPreview(file.name, e.target.result); incrementProcessed(); };
+          reader.readAsText(file);
+        }
+      });
+    }
+
+    function extractTextFromPDF(file) {
+      const reader = new FileReader();
+      reader.onload = async function () {
+        const typedArray = new Uint8Array(this.result);
+        const pdf = await pdfjsLib.getDocument(typedArray).promise;
+        let textContent = `--- ${file.name} (${pdf.numPages} page(s)) ---\n\n`;
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const text = await page.getTextContent();
+          textContent += text.items.map(item => item.str).join(" ") + "\n";
+        }
+        appendToPreview(file.name, textContent);
+        incrementProcessed();
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function appendToPreview(filename, text) {
+      const preview = document.getElementById('filePreview');
+      preview.innerHTML += `<pre><strong>${filename}</strong>\n${text}</pre><hr>`;
+      allExtractedText += `\n\n${filename}\n${text}\n\n`;
+    }
+
+    function incrementProcessed() {
+      processedFiles++;
+
+      if (processedFiles === totalFiles) {
+        document.getElementById('progressIndicator').innerText = 
+          `All ${totalFiles} files processed.`;
+        document.getElementById('chatContainer').style.display = 'block';
+        document.getElementById('copyTextButton').style.display = 'inline-block';
+      }
+
+      document.getElementById('progressIndicator').innerText = 
+        `Processed ${processedFiles} of ${totalFiles} files...`;
+    }
+
+    window.onload = () => {
+      const dropZone = document.getElementById('dropZone');
+      dropZone.addEventListener('click', () => document.getElementById('fileUpload').click());
+      dropZone.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
+      dropZone.addEventListener('drop', handleDrop);
+    };
+
+    window.addEventListener('dragover', e => e.preventDefault());
+    window.addEventListener('drop', e => e.preventDefault());
+  
+    function copyAllExtractedText() {
+      const tempTextarea = document.createElement("textarea");
+      tempTextarea.value = allExtractedText;
+      document.body.appendChild(tempTextarea);
+      tempTextarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(tempTextarea);
+      alert("All extracted text copied!");
+    }
+
+</script>
+</head>
+<body>
+  <h2>Upload, Extract, Catalog, Save to MRK</h2>
+
+  <textarea id="text" rows="10" placeholder="Paste MARC text here..."></textarea><br>
+  <button onclick="save()">Save to Local Storage</button>
+  <button onclick="download()">Download All Saved as .mrk</button>
+
+  <div id="dropZone">
+    <p>Drag & drop PDF or TXT files here or click to select</p>
+    <input type="file" id="fileUpload" accept=".txt,.pdf" multiple onchange="previewFiles(event)" style="display:none;">
+  </div>
+
+  <div style="margin: 20px 0;">
+  <button id="copyTextButton" onclick="copyAllExtractedText()" style="padding: 12px; font-size: 16px; background: #28a745; color: white; border: none; border-radius: 5px;">
+    📋 Copy Extracted Text
+  </button>
+</div>
+<div id="filePreview"></div>
+  <div id="progressIndicator"></div>
+
+
+  <div id="chatContainer" style="display:none; margin-top: 40px;">
+    <h3>Chat with AI for Book Discovery</h3>
+    <iframe
+      src="https://www.chatbase.co/chatbot-iframe/rSb7GdUSjw1kxi8igKkib"
+      width="100%"
+      style="height: 100%; min-height: 700px"
+      frameborder="0"
+    ></iframe>
+  </div>
+
+</body>
+</html>
